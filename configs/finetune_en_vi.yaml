@@ -1,0 +1,35 @@
+# Fine-tuning config: English → Vietnamese
+# Base model: Helsinki-NLP/opus-mt-en-vi (good OPUS baseline)
+# Use this to adapt to domain-specific or higher-quality data.
+
+pair_id: en-vi
+base_model: Helsinki-NLP/opus-mt-en-vi
+
+data:
+  # Option 1: local TSV file (src\ttgt per line)
+  # train_tsv: data/my_en_vi.tsv
+
+  # Option 2: separate source/target files
+  # train_src_file: data/en.txt
+  # train_tgt_file: data/vi.txt
+
+  # Option 3: OPUS-100 dataset (downloaded automatically)
+  use_opus: true
+  max_train_samples: 100000
+  val_ratio: 0.05
+
+training:
+  num_train_epochs: 3
+  per_device_train_batch_size: 8
+  gradient_accumulation_steps: 4    # effective batch = 32
+  learning_rate: 5.0e-5
+  warmup_steps: 500
+  max_source_length: 128
+  max_target_length: 128
+  fp16: false
+  gradient_checkpointing: true
+  eval_steps: 500
+  save_steps: 500
+  early_stopping_patience: 3
+
+output_dir: models/ft_en-vi

@@ -1,0 +1,27 @@
+# ============================================================
+# GPU training (CUDA 12.4 - detected on this machine)
+#
+# Install:
+#   pip install -r requirements-gpu.txt
+#
+# For other CUDA versions, change the --index-url:
+#   CUDA 11.8: https://download.pytorch.org/whl/cu118
+#   CUDA 12.1: https://download.pytorch.org/whl/cu121
+#   CUDA 12.4: https://download.pytorch.org/whl/cu124  (this file)
+# ============================================================
+
+--extra-index-url https://download.pytorch.org/whl/cu124
+
+# Pin chính xác CUDA 12.4 build — không để pip tự chọn cu130/cu131
+torch==2.6.0+cu124
+torchvision==0.21.0+cu124
+
+# Everything else from base requirements
+-r requirements.txt
+
+# 8-bit optimizer: giảm ~50% VRAM khi train (AdamW 8-bit)
+# Cho phep train batch lớn hơn hoặc model lớn hơn trên cùng GPU
+bitsandbytes>=0.43.0
+
+# Training monitor
+tensorboard>=2.14.0

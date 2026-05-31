@@ -1,0 +1,91 @@
+# ============================================================
+# Training config: 5M dataset + vast.ai RTX 3090 (24GB VRAM)
+# ============================================================
+
+output_dir: models/custom_vi_5m
+
+# Warm start từ Helsinki-NLP/opus-mt-en-vi
+warm_start_model: Helsinki-NLP/opus-mt-en-vi
+
+# ----------------------------------------------------------
+# Dữ liệu — dùng file local JSONL 5m
+# ----------------------------------------------------------
+data:
+  pair_configs:
+    en-vi: 5000000
+    zh-vi: 5000000
+    ja-vi: 5000000
+    ko-vi: 3428714          # toàn bộ dữ liệu có sẵn
+
+  # File JSONL local (tải từ download/chuẩn bị sẵn)
+  local_files:
+    en-vi: data/5m/en-vi.jsonl
+    zh-vi: data/5m/zh-vi.jsonl
+    ja-vi: data/5m/ja-vi.jsonl
+    ko-vi: data/5m/ko-vi.jsonl
+
+  add_reverse: true         # thêm VI→ZH, VI→JA, VI→KO, VI→EN
+  temperature: 0.7
+  val_ratio: 0.005          # 0.5% = ~92K val samples (lấy 2000 thực tế)
+  seed: 42
+
+# ----------------------------------------------------------
+# Tokenizer
+# ----------------------------------------------------------
+tokenizer:
+  vocab_size: 50000
+  spm_model: null           # train SPM mới trên toàn bộ 5m data
+
+# ----------------------------------------------------------
+# Architecture (giữ nguyên như base config)
+# ----------------------------------------------------------
+model:
+  encoder_layers: 6
+  decoder_layers: 6
+  d_model: 512
+  encoder_ffn_dim: 2048
+  decoder_ffn_dim: 2048
+  encoder_attention_heads: 8
+  decoder_attention_heads: 8
+  dropout: 0.1
+  attention_dropout: 0.1
+  max_position_embeddings: 512
+  label_smoothing_factor: 0.1
+
+# ----------------------------------------------------------
+# Training — tối ưu cho RTX 3090 (24GB VRAM)
+# ----------------------------------------------------------
+training:
+  num_train_epochs: 5               # 5 epoch đủ với 5M data (thay vì 10 với ít data)
+
+  # RTX 3090 24GB VRAM → có thể batch lớn hơn nhiều
+  per_device_train_batch_size: 64   # 4-8x lớn hơn CPU/small GPU
+  per_device_eval_batch_size: 128
+  gradient_accumulation_steps: 1    # batch 64 đủ lớn, không cần accum
+
+  learning_rate: 1.0e-5             # giữ nguyên cho warm start
+  warmup_steps: 4000                # lớn hơn vì dataset lớn hơn
+  max_grad_norm: 1.0
+
+  max_source_length: 128
+  max_target_length: 128
+
+  fp16: true                        # RTX 3090 hỗ trợ fp16 tốt
+  gradient_checkpointing: false     # 24GB VRAM → không cần gradient checkpointing
+
+  save_total_limit: 3
+  eval_steps: 10000                 # ~1 eval mỗi 1.4% epoch (dataset lớn)
+  save_steps: 10000
+  logging_steps: 500
+  early_stopping_patience: 5
+  seed: 42
+  resume_from_checkpoint: null
+
+# ----------------------------------------------------------
+# Inference settings sau khi train
+# ----------------------------------------------------------
+inference:
+  quantization: int8
+  beam_size: 4
+  max_length: 512
+  device: cpu                       # inference trên CPU server production

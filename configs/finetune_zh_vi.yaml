@@ -1,0 +1,34 @@
+# Fine-tuning config: Chinese → Vietnamese (via pivot EN)
+#
+# Since there's no direct ZH→VI model, we fine-tune the ZH→EN
+# intermediate model on Chinese-Vietnamese parallel data translated
+# through English, OR you can train a direct ZH→VI model from scratch.
+#
+# Strategy:
+#   1. Download ZH-EN parallel data
+#   2. Fine-tune Helsinki-NLP/opus-mt-zh-en on Chinese domain data
+#   3. The improved ZH→EN + existing EN→VI gives better ZH→VI overall
+
+pair_id: zh-en                         # fine-tune the ZH→EN leg of the pivot
+base_model: Helsinki-NLP/opus-mt-zh-en
+
+data:
+  use_opus: true
+  max_train_samples: 100000
+  val_ratio: 0.05
+
+training:
+  num_train_epochs: 3
+  per_device_train_batch_size: 8
+  gradient_accumulation_steps: 4
+  learning_rate: 3.0e-5
+  warmup_steps: 500
+  max_source_length: 128
+  max_target_length: 128
+  fp16: false
+  gradient_checkpointing: true
+  eval_steps: 500
+  save_steps: 500
+  early_stopping_patience: 3
+
+output_dir: models/ft_zh-en

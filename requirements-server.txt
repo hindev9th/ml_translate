@@ -1,0 +1,49 @@
+# ============================================================
+# vast.ai training server — RTX 3090 (24GB VRAM), CUDA 13.1
+# Max CUDA 13.1 driver → dùng PyTorch cu124 (backward compatible)
+#
+# Setup trên vast.ai:
+#   pip install -r requirements-server.txt
+# ============================================================
+
+--extra-index-url https://download.pytorch.org/whl/cu124
+
+# PyTorch CUDA 12.4 (compatible với driver CUDA 13.1)
+torch==2.6.0+cu124
+torchvision==0.21.0+cu124
+
+# Core ML
+transformers>=4.35.0
+sentencepiece>=0.1.99
+sacrebleu>=2.3.0
+datasets>=2.14.0
+fsspec[http]>=2023.1.0,<=2026.2.0
+
+# Fast inference
+ctranslate2>=3.20.0
+
+# Fine-tuning
+accelerate>=0.24.0
+evaluate>=0.4.0
+
+# Training monitor
+tensorboard>=2.14.0
+
+# 8-bit optimizer (optional với 24GB VRAM — dùng standard AdamW)
+# bitsandbytes>=0.43.0
+
+# Web interface
+gradio>=4.7.0
+
+# Language detection
+langdetect>=1.0.9
+
+# Utilities
+PyYAML>=6.0
+tqdm>=4.65.0
+numpy>=1.24.0
+pandas>=2.0.0
+rich>=13.0.0
+click>=8.1.0
+sacremoses>=0.1.0
+requests>=2.28.0

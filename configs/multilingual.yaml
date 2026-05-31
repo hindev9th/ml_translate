@@ -1,0 +1,116 @@
+# ============================================================
+# Config cho training một model MarianMT multilingual duy nhất
+# Hỗ trợ: EN ↔ VI, ZH ↔ VI, JA ↔ VI, KO ↔ VI (8 hướng)
+#
+# Chạy:
+#   python src/multilingual_train.py --config configs/multilingual.yaml
+#   python interface/cli.py train-custom
+# ============================================================
+
+output_dir: models/custom_vi
+
+# ----------------------------------------------------------
+# Warm start (KHUYẾN NGHỊ — hội tụ nhanh hơn 5-10x)
+# ----------------------------------------------------------
+# Khởi tạo weights từ model pretrained thay vì random.
+# Model en-vi đã biết dịch EN↔VI, chỉ cần học thêm ZH/JA/KO.
+# Đặt null để train từ đầu hoàn toàn (chậm hơn nhiều).
+warm_start_model: Helsinki-NLP/opus-mt-en-vi
+
+# ----------------------------------------------------------
+# Dữ liệu huấn luyện
+# ----------------------------------------------------------
+data:
+  # Số câu tối đa mỗi cặp (cả 2 chiều sẽ được thêm tự động)
+  pair_configs:
+    en-vi: 500000       # OPUS-100 en-vi (~1M câu, lấy 500K)
+    zh-vi: 200000       # CCMatrix zh-vi
+    ja-vi: 200000       # CCMatrix ja-vi
+    ko-vi: 200000       # CCMatrix ko-vi
+
+  # Nguồn dữ liệu thay thế (file TSV local, dùng thay cho download)
+  # Ưu tiên file local nếu được cung cấp:
+  local_files:
+    en-vi: null         # vd: data/sample/en_vi.tsv  (null = tải tự động)
+    zh-vi: null         # vd: data/sample/zh_vi.tsv
+    ja-vi: null         # vd: data/sample/ja_vi.tsv
+    ko-vi: null         # vd: data/sample/ko_vi.tsv
+
+  add_reverse: true     # Thêm VI→EN, VI→ZH, ... (gấp đôi data)
+  temperature: 0.7      # Sampling temperature:
+                        #   1.0 = tỷ lệ gốc (EN-VI lớn hơn nhiều)
+                        #   0.7 = cân bằng hơn (khuyến nghị)
+                        #   0.5 = gần như đều nhau
+  val_ratio: 0.02       # 2% data làm validation
+  seed: 42
+
+# ----------------------------------------------------------
+# Tokenizer (SentencePiece BPE dùng chung 5 ngôn ngữ)
+# ----------------------------------------------------------
+tokenizer:
+  vocab_size: 50000       # 50K đủ cho 5 ngôn ngữ (Latin + CJK + Hangul)
+  character_coverage: 0.9999
+  model_type: bpe
+  # Đặt đường dẫn nếu muốn tái sử dụng tokenizer đã train:
+  spm_model: null         # vd: models/custom_vi/spm.model
+
+# ----------------------------------------------------------
+# Kiến trúc model
+# Cấu hình mặc định = MarianMT-base (~77M params)
+# Chạy tốt ở 4GB RAM khi inference INT8
+# ----------------------------------------------------------
+model:
+  encoder_layers: 6
+  decoder_layers: 6
+  d_model: 512
+  encoder_ffn_dim: 2048
+  decoder_ffn_dim: 2048
+  encoder_attention_heads: 8
+  decoder_attention_heads: 8
+  dropout: 0.1
+  attention_dropout: 0.1
+  max_position_embeddings: 512
+  label_smoothing_factor: 0.1
+
+  # Cấu hình nhỏ hơn nếu RAM < 4GB (inference):
+  # encoder_layers: 4
+  # decoder_layers: 4
+  # d_model: 256
+  # encoder_ffn_dim: 1024
+  # decoder_ffn_dim: 1024
+  # encoder_attention_heads: 4
+  # decoder_attention_heads: 4
+
+# ----------------------------------------------------------
+# Huấn luyện
+# ----------------------------------------------------------
+training:
+  num_train_epochs: 10
+  per_device_train_batch_size: 16
+  per_device_eval_batch_size: 32
+  gradient_accumulation_steps: 2    # Effective batch = 32
+  learning_rate: 1.0e-5             # Rất thấp — giữ EN-VI quality, học thêm CJK
+  warmup_steps: 500
+  max_grad_norm: 1.0
+  max_source_length: 128
+  max_target_length: 128
+  fp16: true                        # CUDA 12.4 detected — fp16 enabled
+  gradient_checkpointing: true
+  save_total_limit: 3
+  eval_steps: 5000                  # 1.4M samples → 50K steps/epoch → eval mỗi ~10%
+  save_steps: 5000
+  logging_steps: 200
+  early_stopping_patience: 5        # Tăng patience vì model train từ đầu cần thêm thời gian
+  seed: 42
+  resume_from_checkpoint: null
+
+# ----------------------------------------------------------
+# Inference (sau khi train xong)
+# ----------------------------------------------------------
+inference:
+  # Chuyển sang CTranslate2 INT8 sau training để inference nhanh hơn:
+  #   python interface/cli.py convert-custom
+  quantization: int8                # int8 / float16 / float32
+  beam_size: 4
+  max_length: 512
+  device: cpu

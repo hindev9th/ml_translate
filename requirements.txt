@@ -1,0 +1,36 @@
+# ============================================================
+# CPU-only (inference + web interface)
+# pip install -r requirements.txt
+# ============================================================
+
+# Core ML — CPU build (nhẹ, đủ dùng cho inference)
+torch>=2.0.0
+transformers
+sentencepiece>=0.1.99
+sacrebleu>=2.3.0
+datasets>=2.14.0
+fsspec[http]>=2023.1.0,<=2026.2.0
+
+# Fast inference (INT8 quantization, ~3-4x nhanh, ~50% ít RAM hơn)
+ctranslate2>=3.20.0
+
+# Fine-tuning & monitoring
+accelerate>=0.24.0
+evaluate>=0.4.0
+tensorboard>=2.14.0
+
+# Web interface
+gradio>=4.7.0
+
+# Language detection
+langdetect>=1.0.9
+
+# Utilities
+PyYAML>=6.0
+tqdm>=4.65.0
+numpy>=1.24.0
+pandas>=2.0.0
+rich>=13.0.0
+click>=8.1.0
+sacremoses
+requests>=2.28.0

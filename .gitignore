@@ -1,0 +1,31 @@
+.venv/
+venv
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.env
+
+# Downloaded models (large binary files)
+models/hf_*/
+models/ct2_*/
+models/ft_*/
+models/trained_*/
+models/custom_vi
+
+# Data
+data/*.tsv
+data/5m
+data/*.txt
+data/opus*/
+data/cache
+data/flores*/
+!data/sample/
+
+# Gradio temp files
+gradio_cached_examples/
+flagged/
+*.tmp

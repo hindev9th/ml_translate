@@ -1,0 +1,26 @@
+# Fine-tuning config: Japanese → Vietnamese (via pivot EN)
+# Fine-tunes the JA→EN intermediate model.
+
+pair_id: ja-en
+base_model: Helsinki-NLP/opus-mt-jap-en
+
+data:
+  use_opus: true
+  max_train_samples: 100000
+  val_ratio: 0.05
+
+training:
+  num_train_epochs: 3
+  per_device_train_batch_size: 8
+  gradient_accumulation_steps: 4
+  learning_rate: 3.0e-5
+  warmup_steps: 500
+  max_source_length: 128
+  max_target_length: 128
+  fp16: false
+  gradient_checkpointing: true
+  eval_steps: 500
+  save_steps: 500
+  early_stopping_patience: 3
+
+output_dir: models/ft_ja-en

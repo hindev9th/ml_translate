@@ -1,0 +1,55 @@
+# Base configuration shared across all training runs
+# Override in pair-specific configs
+
+model:
+  architecture: marian           # marian (MarianMT) or opus-mt
+  encoder_layers: 6
+  decoder_layers: 6
+  d_model: 512
+  encoder_ffn_dim: 2048
+  decoder_ffn_dim: 2048
+  encoder_attention_heads: 8
+  decoder_attention_heads: 8
+  dropout: 0.1
+  attention_dropout: 0.1
+  max_position_embeddings: 512
+  vocab_size: 32000
+
+tokenizer:
+  type: sentencepiece
+  character_coverage: 0.9995
+  model_type: bpe
+  num_threads: 4
+
+training:
+  num_train_epochs: 3
+  per_device_train_batch_size: 8
+  per_device_eval_batch_size: 16
+  gradient_accumulation_steps: 4
+  learning_rate: 5.0e-5
+  warmup_steps: 500
+  max_source_length: 128
+  max_target_length: 128
+  fp16: false                    # set true if GPU with fp16 support
+  gradient_checkpointing: true   # saves ~30% RAM during training
+  label_smoothing: 0.1
+  save_total_limit: 2
+  eval_steps: 500
+  save_steps: 500
+  logging_steps: 100
+  early_stopping_patience: 3
+  seed: 42
+
+inference:
+  backend: ctranslate2           # ctranslate2 (recommended) or huggingface
+  quantization: int8             # int8 / int8_float16 / float16 / float32
+  beam_size: 4
+  max_length: 512
+  device: cpu
+  max_loaded_models: 3           # LRU cache size (limits peak RAM)
+
+data:
+  max_train_samples: 100000
+  val_ratio: 0.05
+  filter_max_length_ratio: 9.0
+  filter_max_words: 200
