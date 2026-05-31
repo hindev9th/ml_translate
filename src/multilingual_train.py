@@ -332,56 +332,94 @@ def train(cfg: MultilingualTrainConfig = None):
         pretrained_model = None
     logger.info(f"Vocabulary size: {len(tokenizer):,}")
 
-    # ---- Step 3: Build HF dataset ----
+    # ---- Step 3: Build HF dataset (với disk cache để tránh map lại) ----
     logger.info("Step 3/4: Tokenizing and building dataset ...")
 
-    # Combine tagged pairs
-    all_src, all_tgt = [], []
-    for pair_id, (srcs, tgts) in pair_data.items():
-        src_lang, tgt_lang = pair_id.split("-")
-        tagged_s, tagged_t = prepare_pairs(srcs, tgts, src_lang, tgt_lang, cfg.add_reverse)
-        all_src.extend(tagged_s)
-        all_tgt.extend(tagged_t)
+    # Cache key dựa trên config — thay đổi data/tokenizer = cache mới
+    import hashlib, json as _json
+    _cache_key = hashlib.md5(_json.dumps({
+        "local_files": sorted(cfg.local_files.items()),
+        "pair_configs": sorted(cfg.pair_configs.items()),
+        "add_reverse": cfg.add_reverse,
+        "max_src": cfg.max_source_length,
+        "max_tgt": cfg.max_target_length,
+        "warm_start": cfg.warm_start_model,
+        "seed": cfg.seed,
+    }, sort_keys=True).encode()).hexdigest()[:10]
 
-    # Shuffle
-    import random
-    rng = random.Random(cfg.seed)
-    paired = list(zip(all_src, all_tgt))
-    rng.shuffle(paired)
-    all_src, all_tgt = zip(*paired)
+    cache_dir = os.path.join(cfg.output_dir, f"dataset_cache_{_cache_key}")
 
     from datasets import Dataset, DatasetDict
 
-    ds = Dataset.from_dict({"src": list(all_src), "tgt": list(all_tgt)})
+    if os.path.isdir(cache_dir):
+        logger.info(f"Loading tokenized dataset from cache: {cache_dir}")
+        logger.info("(Bỏ qua bước map — đã được cache từ lần chạy trước)")
+        dataset = DatasetDict.load_from_disk(cache_dir)
+        # Giới hạn eval size nếu cần
+        val_ds = dataset["validation"]
+        if cfg.max_eval_samples and len(val_ds) > cfg.max_eval_samples:
+            val_ds = val_ds.select(range(cfg.max_eval_samples))
+            dataset = DatasetDict({"train": dataset["train"], "validation": val_ds})
+        logger.info(f"Train: {len(dataset['train']):,}  Val: {len(dataset['validation']):,}")
+    else:
+        # Combine tagged pairs
+        all_src, all_tgt = [], []
+        for pair_id, (srcs, tgts) in pair_data.items():
+            src_lang, tgt_lang = pair_id.split("-")
+            tagged_s, tagged_t = prepare_pairs(srcs, tgts, src_lang, tgt_lang, cfg.add_reverse)
+            all_src.extend(tagged_s)
+            all_tgt.extend(tagged_t)
 
-    def preprocess(batch):
-        model_inputs = tokenizer(
-            batch["src"],
-            max_length=cfg.max_source_length,
-            truncation=True,
-            padding=False,
-        )
-        labels = tokenizer(
-            text_target=batch["tgt"],
-            max_length=cfg.max_target_length,
-            truncation=True,
-            padding=False,
-        )
-        model_inputs["labels"] = labels["input_ids"]
-        return model_inputs
+        # Shuffle
+        import random
+        rng = random.Random(cfg.seed)
+        paired = list(zip(all_src, all_tgt))
+        rng.shuffle(paired)
+        all_src, all_tgt = zip(*paired)
 
-    ds = ds.map(preprocess, batched=True, remove_columns=["src", "tgt"])
-    n_val = max(500, int(len(ds) * cfg.val_ratio))
-    split = ds.train_test_split(test_size=n_val, shuffle=True, seed=cfg.seed)
-    val_ds = split["test"]
+        ds = Dataset.from_dict({"src": list(all_src), "tgt": list(all_tgt)})
+        total = len(ds)
+        logger.info(f"Tokenizing {total:,} pairs — lần đầu mất thời gian, lần sau load từ cache ...")
 
-    # Giới hạn eval size để eval không mất hàng chục phút mỗi lần
-    if cfg.max_eval_samples and len(val_ds) > cfg.max_eval_samples:
-        val_ds = val_ds.select(range(cfg.max_eval_samples))
-        logger.info(f"Eval limited to {cfg.max_eval_samples} samples (from {n_val:,})")
+        def preprocess(batch):
+            model_inputs = tokenizer(
+                batch["src"],
+                max_length=cfg.max_source_length,
+                truncation=True,
+                padding=False,
+            )
+            labels = tokenizer(
+                text_target=batch["tgt"],
+                max_length=cfg.max_target_length,
+                truncation=True,
+                padding=False,
+            )
+            model_inputs["labels"] = labels["input_ids"]
+            return model_inputs
 
-    dataset = DatasetDict({"train": split["train"], "validation": val_ds})
-    logger.info(f"Train: {len(dataset['train']):,}  Val: {len(dataset['validation']):,}")
+        ds = ds.map(preprocess, batched=True, batch_size=2000,
+                    remove_columns=["src", "tgt"],
+                    num_proc=4,          # dùng 4 CPU cores để map song song
+                    desc="Tokenizing")
+
+        n_val = max(500, int(len(ds) * cfg.val_ratio))
+        split = ds.train_test_split(test_size=n_val, shuffle=True, seed=cfg.seed)
+        val_ds = split["test"]
+
+        # Giới hạn eval size để eval không mất nhiều thời gian
+        if cfg.max_eval_samples and len(val_ds) > cfg.max_eval_samples:
+            val_ds = val_ds.select(range(cfg.max_eval_samples))
+            logger.info(f"Eval limited to {cfg.max_eval_samples} samples (from {n_val:,})")
+
+        dataset = DatasetDict({"train": split["train"], "validation": val_ds})
+        logger.info(f"Train: {len(dataset['train']):,}  Val: {len(dataset['validation']):,}")
+
+        # Lưu cache xuống disk để lần sau load nhanh
+        logger.info(f"Saving tokenized dataset to cache: {cache_dir}")
+        # Lưu full validation (không bị giới hạn max_eval_samples)
+        full_val = split["test"]
+        DatasetDict({"train": split["train"], "validation": full_val}).save_to_disk(cache_dir)
+        logger.info(f"Cache saved. Lần sau sẽ load ngay lập tức.")
 
     # ---- Step 4: Build model and train ----
     logger.info("Step 4/4: Building model and starting training ...")
