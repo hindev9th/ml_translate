@@ -290,45 +290,44 @@ def train(cfg: MultilingualTrainConfig = None):
     logger.info(f"  Output: {cfg.output_dir}")
     logger.info("=" * 60)
 
-    # ---- Step 1: Download corpus (need raw text for tokenizer training) ----
-    logger.info("Step 1/4: Downloading parallel corpora ...")
+    # ---- Step 1: Collect file paths (KHÔNG load vào RAM ngay) ----
+    logger.info("Step 1/4: Resolving data sources ...")
     from .multilingual_data import download_pair, prepare_pairs
     from .data_utils import filter_pairs
 
-    raw_corpus: list = []
-    pair_data: dict = {}
+    # Chỉ lưu (pair_id, file_path, max_n) — chưa đọc dữ liệu
+    data_sources: list = []   # [(pair_id, src_lang, tgt_lang, local_path, max_n)]
 
     for pair_id, max_n in cfg.pair_configs.items():
         src_lang, tgt_lang = pair_id.split("-")
-
-        # Local file takes priority over auto-download (hỗ trợ .jsonl và .tsv)
         local_path = cfg.local_files.get(pair_id)
         if local_path and os.path.isfile(local_path):
-            logger.info(f"Loading local file for {pair_id}: {local_path}")
-            from .data_utils import load_auto
-            max_n_local = cfg.pair_configs.get(pair_id, 0)
-            srcs, tgts = load_auto(local_path, max_lines=max_n_local)
+            logger.info(f"  {pair_id}: {local_path} (max={max_n:,})")
+            data_sources.append((pair_id, src_lang, tgt_lang, local_path, max_n))
         else:
-            srcs, tgts = download_pair(src_lang, tgt_lang, max_samples=max_n)
+            logger.info(f"  {pair_id}: will download (max={max_n:,})")
+            data_sources.append((pair_id, src_lang, tgt_lang, None, max_n))
 
-        if srcs:
-            srcs, tgts = filter_pairs(srcs, tgts)
-            pair_data[pair_id] = (srcs, tgts)
-            raw_corpus.extend(srcs)
-            raw_corpus.extend(tgts)
+    if not data_sources:
+        raise RuntimeError("No data sources found.")
 
-    if not raw_corpus:
-        raise RuntimeError("No data downloaded. Check internet connection or pair configs.")
-
-    # ---- Step 2: Tokenizer + Model ----
+    # ---- Step 2: Tokenizer + Model (trước khi load data) ----
     if cfg.warm_start_model:
         logger.info(f"Step 2/4: Warm start from {cfg.warm_start_model} ...")
         tokenizer, pretrained_model = _warm_start_tokenizer_and_model(
             cfg.warm_start_model, cfg.output_dir
         )
     else:
-        logger.info("Step 2/4: Training shared tokenizer from scratch ...")
-        tokenizer = _train_or_load_tokenizer(cfg, raw_corpus)
+        # Cần sample nhỏ để train tokenizer — chỉ load 50K/pair
+        logger.info("Step 2/4: Training shared tokenizer (sampling corpus) ...")
+        sample_corpus = []
+        for pair_id, src_lang, tgt_lang, local_path, max_n in data_sources:
+            if local_path:
+                from .data_utils import load_auto
+                s, t = load_auto(local_path, max_lines=50_000)
+                sample_corpus.extend(s); sample_corpus.extend(t)
+        tokenizer = _train_or_load_tokenizer(cfg, sample_corpus)
+        del sample_corpus
         pretrained_model = None
     logger.info(f"Vocabulary size: {len(tokenizer):,}")
 
@@ -364,24 +363,36 @@ def train(cfg: MultilingualTrainConfig = None):
             dataset = DatasetDict({"train": dataset["train"], "validation": val_ds})
         logger.info(f"Train: {len(dataset['train']):,}  Val: {len(dataset['validation']):,}")
     else:
-        # Combine tagged pairs
-        all_src, all_tgt = [], []
-        for pair_id, (srcs, tgts) in pair_data.items():
-            src_lang, tgt_lang = pair_id.split("-")
-            tagged_s, tagged_t = prepare_pairs(srcs, tgts, src_lang, tgt_lang, cfg.add_reverse)
-            all_src.extend(tagged_s)
-            all_tgt.extend(tagged_t)
-
-        # Shuffle
+        # Dùng generator để tránh load toàn bộ 36M samples vào RAM cùng lúc
         import random
-        rng = random.Random(cfg.seed)
-        paired = list(zip(all_src, all_tgt))
-        rng.shuffle(paired)
-        all_src, all_tgt = zip(*paired)
 
-        ds = Dataset.from_dict({"src": list(all_src), "tgt": list(all_tgt)})
+        def _pair_generator():
+            """Yield từng (src, tgt) pair từ file, không giữ toàn bộ trong RAM."""
+            rng_gen = random.Random(cfg.seed)
+            all_items = []
+            for pair_id, src_lang, tgt_lang, local_path, max_n in data_sources:
+                if local_path:
+                    from .data_utils import load_auto
+                    srcs, tgts = load_auto(local_path, max_lines=max_n)
+                else:
+                    srcs, tgts = download_pair(src_lang, tgt_lang, max_samples=max_n)
+                srcs, tgts = filter_pairs(srcs, tgts)
+                tagged_s, tagged_t = prepare_pairs(srcs, tgts, src_lang, tgt_lang, cfg.add_reverse)
+                # Giải phóng bộ nhớ ngay
+                del srcs, tgts
+                all_items.extend(zip(tagged_s, tagged_t))
+                del tagged_s, tagged_t
+                logger.info(f"  Loaded {pair_id}: {len(all_items):,} total pairs so far")
+
+            logger.info(f"Shuffling {len(all_items):,} pairs ...")
+            rng_gen.shuffle(all_items)
+            for s, t in all_items:
+                yield {"src": s, "tgt": t}
+
+        logger.info("Building dataset from generator (tiết kiệm RAM) ...")
+        ds = Dataset.from_generator(_pair_generator)
         total = len(ds)
-        logger.info(f"Tokenizing {total:,} pairs — lần đầu mất thời gian, lần sau load từ cache ...")
+        logger.info(f"Tokenizing {total:,} pairs — lan dau mat thoi gian, lan sau load tu cache ...")
 
         def preprocess(batch):
             model_inputs = tokenizer(
