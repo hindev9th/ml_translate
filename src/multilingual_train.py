@@ -351,7 +351,9 @@ def train(cfg: MultilingualTrainConfig = None):
 
     from datasets import Dataset, DatasetDict
 
-    if os.path.isdir(cache_dir):
+    _cache_ready = os.path.join(cache_dir, "_CACHE_COMPLETE")
+
+    if os.path.isdir(cache_dir) and os.path.isfile(_cache_ready):
         logger.info(f"Loading tokenized dataset from cache: {cache_dir}")
         logger.info("(Bỏ qua bước map — đã được cache từ lần chạy trước)")
         dataset = DatasetDict.load_from_disk(cache_dir)
@@ -399,7 +401,6 @@ def train(cfg: MultilingualTrainConfig = None):
 
         ds = ds.map(preprocess, batched=True, batch_size=2000,
                     remove_columns=["src", "tgt"],
-                    num_proc=4,          # dùng 4 CPU cores để map song song
                     desc="Tokenizing")
 
         n_val = max(500, int(len(ds) * cfg.val_ratio))
@@ -415,11 +416,22 @@ def train(cfg: MultilingualTrainConfig = None):
         logger.info(f"Train: {len(dataset['train']):,}  Val: {len(dataset['validation']):,}")
 
         # Lưu cache xuống disk để lần sau load nhanh
-        logger.info(f"Saving tokenized dataset to cache: {cache_dir}")
-        # Lưu full validation (không bị giới hạn max_eval_samples)
-        full_val = split["test"]
-        DatasetDict({"train": split["train"], "validation": full_val}).save_to_disk(cache_dir)
-        logger.info(f"Cache saved. Lần sau sẽ load ngay lập tức.")
+        # Kiểm tra không có process khác đang build cache
+        _lock = cache_dir + ".lock"
+        if os.path.exists(_lock):
+            logger.warning(f"Cache lock detected at {_lock}. Another process may be building cache. Skipping save.")
+        else:
+            open(_lock, "w").close()
+            try:
+                logger.info(f"Saving tokenized dataset to cache: {cache_dir}")
+                full_val = split["test"]
+                DatasetDict({"train": split["train"], "validation": full_val}).save_to_disk(cache_dir)
+                # Đánh dấu cache hoàn chỉnh
+                open(_cache_ready, "w").close()
+                logger.info("Cache saved. Lan sau se load ngay lap tuc.")
+            finally:
+                if os.path.exists(_lock):
+                    os.remove(_lock)
 
     # ---- Step 4: Build model and train ----
     logger.info("Step 4/4: Building model and starting training ...")

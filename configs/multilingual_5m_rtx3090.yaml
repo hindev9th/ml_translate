@@ -79,11 +79,7 @@ training:
   logging_steps: 500
   early_stopping_patience: 5
   seed: 42
-  resume_from_checkpoint: null      # đặt path checkpoint nếu muốn resume
-
-# Số CPU cores dùng để tokenize song song (lần đầu chạy)
-# AMD EPYC 7B12 có 64 cores → dùng tối đa
-dataloader_num_workers: 8
+  resume_from_checkpoint: null      # dat path checkpoint neu muon resume
 
 # ----------------------------------------------------------
 # Inference settings sau khi train
